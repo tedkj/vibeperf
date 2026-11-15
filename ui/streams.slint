@@ -1,0 +1,97 @@
+// Every stream of the test on screen: its id and way, bytes, rate, and TCP's retransmissions,
+// round trip and congestion window, or UDP's jitter and loss. One accessibility node per row.
+
+import { ListView } from "std-widgets.slint";
+import { Theme, Type } from "@vibeware";
+import { StreamLine } from "types.slint";
+
+export global StreamCols {
+    out property <length> id: 34px;
+    out property <length> dir: 40px;
+    out property <length> bytes: 76px;
+    out property <length> rate: 92px;
+    out property <length> a: 170px;
+    out property <length> b: 116px;
+    out property <length> c: 80px;
+    out property <length> spacing: 10px;
+}
+
+component Cell inherits Text {
+    font-family: Type.mono;
+    font-size: Type.small;
+    color: Theme.ink-2;
+    vertical-alignment: center;
+    horizontal-alignment: right;
+    overflow: elide;
+    accessible-role: none;
+}
+
+component Line inherits Rectangle {
+    in property <StreamLine> s;
+    height: 24px;
+    accessible-role: list-item;
+    accessible-label: "Stream " + root.s.id;
+    accessible-description: root.s.a11y;
+    HorizontalLayout {
+        padding-left: 14px;
+        padding-right: 14px;
+        spacing: StreamCols.spacing;
+        Cell { width: StreamCols.id; text: root.s.id; color: Theme.ink-3; }
+        Cell { width: StreamCols.dir; text: root.s.dir; horizontal-alignment: left; color: Theme.ink-3; }
+        Cell { width: StreamCols.bytes; text: root.s.bytes; }
+        Cell { width: StreamCols.rate; text: root.s.rate; color: Theme.ink; }
+        Cell { width: StreamCols.a; text: root.s.col-a; }
+        Cell { width: StreamCols.b; text: root.s.col-b; }
+        Cell { width: StreamCols.c; text: root.s.col-c; }
+        Rectangle { horizontal-stretch: 1; }
+    }
+}
+
+component Head inherits Text {
+    font-family: Type.mono;
+    font-size: Type.small;
+    color: Theme.ink-3;
+    vertical-alignment: center;
+    horizontal-alignment: right;
+    overflow: elide;
+    accessible-role: none;
+}
+
+export component StreamTable inherits Rectangle {
+    in property <[StreamLine]> rows;
+    // "RETRANSMITTED", "RTT", "CWND" or "JITTER", "LOST / TOTAL", "".
+    in property <string> head-a;
+    in property <string> head-b;
+    in property <string> head-c;
+    // Room for this many rows before the list scrolls.
+    in property <int> visible-rows: 4;
+    height: 25px + Math.min(Math.max(root.rows.length, 1), root.visible-rows) * 24px + 4px;
+
+    VerticalLayout {
+        Rectangle {
+            height: 24px;
+            HorizontalLayout {
+                padding-left: 14px;
+                padding-right: 14px;
+                spacing: StreamCols.spacing;
+                Head { width: StreamCols.id; text: "ID"; }
+                Head { width: StreamCols.dir; text: "WAY"; horizontal-alignment: left; }
+                Head { width: StreamCols.bytes; text: "BYTES"; }
+                Head { width: StreamCols.rate; text: "MBIT/S"; }
+                Head { width: StreamCols.a; text: root.head-a; }
+                Head { width: StreamCols.b; text: root.head-b; }
+                Head { width: StreamCols.c; text: root.head-c; }
+                Rectangle { horizontal-stretch: 1; }
+            }
+        }
+        Rectangle { height: 1px; background: Theme.line; }
+        Rectangle {
+            vertical-stretch: 1;
+            accessible-role: list;
+            accessible-label: "Streams";
+            ListView {
+                for s in root.rows: Line { s: s; }
+            }
+        }
+    }
+}

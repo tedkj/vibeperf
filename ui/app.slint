@@ -1,0 +1,642 @@
+// VibePerf's main window. Layout and drawing only; every decision is made in Rust.
+
+import { Theme, Type, Icons, Icon, IconButton, Button, ButtonKind, Field, Segmented, Select, CopyButton, TipLayer, TipArea, Toast, ToastKind } from "@vibeware";
+import { Brand, AboutDialog, CheckRow } from "brand.slint";
+import { TileInfo, ChartInfo, StreamLine, RunLine, ReachLine } from "types.slint";
+import { HostField } from "fields.slint";
+import { SummaryStrip } from "summary.slint";
+import { Chart } from "chart.slint";
+import { StreamTable } from "streams.slint";
+import { RunList, ReachList } from "side.slint";
+import { FirewallDialog } from "dialogs.slint";
+
+export struct ToastItem {
+    id: int,
+    text: string,
+    kind: ToastKind,
+    action: string,
+}
+
+// VibePerf's own icon: the start mark, its slanted sides at 45 degrees.
+global AppIcons {
+    out property <string> play: "M 5.5 3.5 L 10.5 8.5 L 5.5 13.5 Z";
+}
+
+export component AppWindow inherits Window {
+    title: "VibePerf";
+    icon: @image-url("../assets/app-128.png");
+    preferred-width: 1180px;
+    preferred-height: 720px;
+    min-width: 1040px;
+    min-height: 600px;
+    background: Theme.bg;
+    default-font-family: Type.ui;
+    default-font-size: Type.small;
+    default-font-weight: Type.regular;
+
+    in property <string> version;
+    in-out property <bool> about-open;
+    // About's version line and its install check (the controller's words and states).
+    in property <string> about-line;
+    in property <[CheckRow]> check-rows;
+    in property <bool> checking;
+    in property <bool> checked;
+    in-out property <bool> fw-open;
+    in property <[ToastItem]> toasts;
+
+    // 0 client, 1 server.
+    in property <int> mode;
+
+    // ---- the client's controls ----
+    in-out property <string> host;
+    in property <bool> host-invalid;
+    in property <[string]> recent;
+    in-out property <string> port: "5201";
+    in property <bool> port-invalid;
+    in property <int> proto;
+    in property <int> direction;
+    in property <int> streams;
+    in-out property <string> duration: "10 s";
+    in property <bool> duration-invalid;
+    in-out property <string> bitrate: "100 Mbit/s";
+    in property <bool> bitrate-invalid;
+    // A test is running: Start says Stop.
+    in property <bool> running;
+
+    // ---- the server's controls ----
+    in-out property <string> server-port: "5201";
+    in property <bool> server-port-invalid;
+    in property <bool> serving;
+    // Checking the firewall, or waiting for Windows' prompt: the button waits too.
+    in property <bool> server-busy;
+    in property <string> server-button: "Start server";
+    in property <string> server-note;
+    // 0 quiet, 1 ok, 2 warn, 3 danger.
+    in property <int> server-note-state;
+    // "Remove" next to the note (a rule left from before).
+    in property <string> server-note-action;
+    in property <[ReachLine]> reach;
+    in property <string> reach-empty;
+    // In the main area when no served test is on screen: how to test against this computer.
+    in property <string> server-hint;
+    in property <string> server-command;
+
+    // ---- the test on screen ----
+    in property <[TileInfo]> tiles;
+    in property <string> hint-before;
+    in property <string> hint-key;
+    in property <string> hint-after;
+    in property <string> run-title;
+    in property <string> run-outcome;
+    in property <int> run-outcome-state;
+    in property <bool> run-done;
+    in-out property <string> run-label;
+    in property <bool> run-label-shown;
+    in property <ChartInfo> chart;
+    in property <[StreamLine]> stream-rows;
+    in property <string> head-a;
+    in property <string> head-b;
+    in property <string> head-c;
+    in property <[string]> hints;
+
+    // ---- the lists ----
+    in property <[RunLine]> history;
+    in property <string> history-count;
+    in property <string> history-empty;
+    in property <string> history-note;
+    in property <int> history-scroll-to: -1;
+    in property <int> history-scroll-seq;
+    in property <[RunLine]> served;
+    in property <string> served-count;
+    in property <int> served-scroll-to: -1;
+    in property <int> served-scroll-seq;
+
+    in property <string> status-left;
+    in property <string> status-right;
+
+    // ---- the firewall question ----
+    in property <string> fw-body;
+    in property <bool> fw-has-blocks;
+    in-out property <bool> fw-remove-blocks: false;
+
+    callback toggle-theme();
+    // About: "Check this install" pressed (the controller runs it on a worker, once at a time),
+    // and the website link.
+    callback check-install();
+    callback open-site();
+    callback mode-picked(int);
+    callback host-edited(string);
+    callback host-accepted();
+    callback host-escaped() -> bool;
+    callback recent-picked(int);
+    // A field of the client's: 0 port, 1 duration, 2 bitrate.
+    callback field-edited(int, string);
+    callback field-escaped(int) -> bool;
+    callback proto-picked(int);
+    callback direction-picked(int);
+    callback streams-picked(int);
+    callback start-clicked();
+    callback server-port-edited(string);
+    callback server-port-escaped() -> bool;
+    callback server-clicked();
+    callback server-note-clicked();
+    callback fw-continue();
+    callback fw-cancel();
+    callback label-edited(string);
+    callback label-accepted();
+    callback label-escaped() -> bool;
+    callback copy-line() -> bool;
+    callback copy-block() -> bool;
+    callback history-clicked(string);
+    callback history-opened(string);
+    callback history-key(string, bool, bool) -> bool;
+    callback served-clicked(string);
+    callback served-key(string, bool, bool) -> bool;
+    callback chart-resized(length, length);
+    callback toast-action(int);
+    callback toast-dismissed(int);
+    // A dialog closed: toasts behind it get their full time again (a toast in sight but out of
+    // reach must not expire).
+    callback dialogs-closed();
+    callback copy-text(string) -> bool;
+
+    property <bool> inert: root.about-open || root.fw-open;
+
+    changed inert => {
+        if (!self.inert) {
+            root.dialogs-closed();
+        }
+    }
+
+    VerticalLayout {
+        // ---- the bar ----
+        Rectangle {
+            height: 48px;
+            HorizontalLayout {
+                padding-left: 14px;
+                padding-right: 10px;
+                spacing: 8px;
+                Brand {}
+                Rectangle { width: 10px; }
+                VerticalLayout {
+                    alignment: center;
+                    Segmented {
+                        label: "Mode";
+                        options: ["Client", "Server"];
+                        selected: root.mode;
+                        controlled: true;
+                        inert: root.inert;
+                        changed(i) => { root.mode-picked(i); }
+                    }
+                }
+                Rectangle { horizontal-stretch: 1; }
+                VerticalLayout {
+                    alignment: center;
+                    IconButton {
+                        icon: Icons.theme;
+                        label: "Theme";
+                        tooltip: Theme.dark ? "Light theme" : "Dark theme";
+                        inert: root.inert;
+                        clicked => { root.toggle-theme(); }
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    IconButton {
+                        icon: Icons.info;
+                        label: "About";
+                        tooltip: "About VibePerf";
+                        inert: root.inert;
+                        clicked => { root.about-open = true; }
+                    }
+                }
+            }
+        }
+        Rectangle { height: 1px; background: Theme.line; }
+
+        // ---- the controls ----
+        Rectangle {
+            height: 46px;
+            if root.mode == 0: HorizontalLayout {
+                padding-left: 14px;
+                padding-right: 14px;
+                spacing: 8px;
+                VerticalLayout {
+                    alignment: center;
+                    horizontal-stretch: 1;
+                    min-width: 150px;
+                    HostField {
+                        text <=> root.host;
+                        invalid: root.host-invalid;
+                        inert: root.inert || root.running;
+                        recent: root.recent;
+                        edited(t) => { root.host-edited(t); }
+                        accepted => { root.host-accepted(); }
+                        recent-picked(i) => { root.recent-picked(i); }
+                        escaped => { root.host-escaped() }
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    Field {
+                        width: 92px;
+                        horizontal-stretch: 0;
+                        label: "PORT";
+                        mono: true;
+                        text <=> root.port;
+                        invalid: root.port-invalid;
+                        enabled: !root.running;
+                        inert: root.inert;
+                        edited(t) => { root.field-edited(0, t); }
+                        accepted => { root.start-clicked(); }
+                        escaped => { root.field-escaped(0) }
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    Segmented {
+                        label: "Protocol";
+                        options: ["TCP", "UDP"];
+                        selected: root.proto;
+                        controlled: true;
+                        inert: root.inert || root.running;
+                        changed(i) => { root.proto-picked(i); }
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    Segmented {
+                        label: "Direction";
+                        options: ["Normal", "Reverse", "Both"];
+                        selected: root.direction;
+                        controlled: true;
+                        inert: root.inert || root.running;
+                        changed(i) => { root.direction-picked(i); }
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    Select {
+                        width: 100px;
+                        label: "Streams";
+                        options: ["1 stream", "2 streams", "3 streams", "4 streams", "5 streams", "6 streams", "7 streams", "8 streams"];
+                        selected: root.streams;
+                        controlled: true;
+                        inert: root.inert || root.running;
+                        changed(i) => { root.streams-picked(i); }
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    Field {
+                        width: 92px;
+                        horizontal-stretch: 0;
+                        label: "TIME";
+                        mono: true;
+                        text <=> root.duration;
+                        invalid: root.duration-invalid;
+                        enabled: !root.running;
+                        inert: root.inert;
+                        edited(t) => { root.field-edited(1, t); }
+                        accepted => { root.start-clicked(); }
+                        escaped => { root.field-escaped(1) }
+                    }
+                }
+                if root.proto == 1: VerticalLayout {
+                    alignment: center;
+                    Field {
+                        width: 138px;
+                        horizontal-stretch: 0;
+                        label: "RATE";
+                        mono: true;
+                        text <=> root.bitrate;
+                        invalid: root.bitrate-invalid;
+                        enabled: !root.running;
+                        inert: root.inert;
+                        edited(t) => { root.field-edited(2, t); }
+                        accepted => { root.start-clicked(); }
+                        escaped => { root.field-escaped(2) }
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    Button {
+                        width: 86px;
+                        text: root.running ? "Stop" : "Start";
+                        icon: root.running ? Icons.stop : AppIcons.play;
+                        kind: root.running ? ButtonKind.secondary : ButtonKind.primary;
+                        tooltip: root.running ? "Stop the test" : "Start the test (Enter)";
+                        inert: root.inert;
+                        clicked => { root.start-clicked(); }
+                    }
+                }
+            }
+            if root.mode == 1: HorizontalLayout {
+                padding-left: 14px;
+                padding-right: 14px;
+                spacing: 8px;
+                VerticalLayout {
+                    alignment: center;
+                    Field {
+                        width: 92px;
+                        horizontal-stretch: 0;
+                        label: "PORT";
+                        mono: true;
+                        text <=> root.server-port;
+                        invalid: root.server-port-invalid;
+                        enabled: !root.serving && !root.server-busy;
+                        inert: root.inert;
+                        edited(t) => { root.server-port-edited(t); }
+                        accepted => { root.server-clicked(); }
+                        escaped => { root.server-port-escaped() }
+                    }
+                }
+                VerticalLayout {
+                    alignment: center;
+                    Button {
+                        text: root.server-button;
+                        icon: root.serving ? Icons.stop : Icons.server;
+                        kind: root.serving ? ButtonKind.secondary : ButtonKind.primary;
+                        enabled: !root.server-busy;
+                        inert: root.inert;
+                        clicked => { root.server-clicked(); }
+                    }
+                }
+                Text {
+                    text: root.server-note;
+                    font-size: Type.small;
+                    color: root.server-note-state == 1 ? Theme.ok-text : root.server-note-state == 2 ? Theme.warn-text : root.server-note-state == 3 ? Theme.danger-text : Theme.ink-2;
+                    vertical-alignment: center;
+                    overflow: elide;
+                    min-width: 0px;
+                    horizontal-stretch: 1;
+                }
+                if root.server-note-action != "": VerticalLayout {
+                    alignment: center;
+                    Button {
+                        text: root.server-note-action;
+                        kind: ButtonKind.ghost;
+                        enabled: !root.server-busy;
+                        inert: root.inert;
+                        clicked => { root.server-note-clicked(); }
+                    }
+                }
+            }
+        }
+        Rectangle { height: 1px; background: Theme.line; }
+
+        // ---- the answer ----
+        // The answer (in server mode only once a test is on screen).
+        if root.tiles.length > 0 || root.hint-before != "": SummaryStrip {
+            tiles: root.tiles;
+            hint-before: root.hint-before;
+            hint-key: root.hint-key;
+            hint-after: root.hint-after;
+        }
+        if root.tiles.length > 0 || root.hint-before != "": Rectangle { height: 1px; background: Theme.line; }
+
+        // ---- the work area ----
+        HorizontalLayout {
+            vertical-stretch: 1;
+            // The test on screen.
+            Rectangle {
+                horizontal-stretch: 1;
+                background: Theme.surface;
+                if root.run-title == "" && root.mode == 1: VerticalLayout {
+                    alignment: center;
+                    spacing: 10px;
+                    padding: 24px;
+                    Text {
+                        text: root.server-hint;
+                        wrap: word-wrap;
+                        horizontal-alignment: center;
+                        font-size: Type.small;
+                        color: Theme.ink-2;
+                    }
+                    if root.server-command != "": HorizontalLayout {
+                        alignment: center;
+                        spacing: 6px;
+                        Text {
+                            text: root.server-command;
+                            font-family: Type.mono;
+                            font-size: Type.body;
+                            font-weight: Type.strong;
+                            color: Theme.ink;
+                            vertical-alignment: center;
+                        }
+                        CopyButton {
+                            tooltip: "Copy the command";
+                            inert: root.inert;
+                            copy => { root.copy-text(root.server-command) }
+                        }
+                    }
+                }
+                if root.run-title == "" && root.mode == 0: Text {
+                    text: "Each second's throughput and every stream's numbers show here while a test runs.";
+                    color: Theme.ink-3;
+                    font-size: Type.small;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+                if root.run-title != "": VerticalLayout {
+                    // Which test, how it ended, your words for it, Copy.
+                    Rectangle {
+                        height: 40px;
+                        HorizontalLayout {
+                            padding-left: 14px;
+                            padding-right: 10px;
+                            spacing: 10px;
+                            Text {
+                                text: root.run-title;
+                                font-size: Type.small;
+                                font-weight: Type.strong;
+                                color: Theme.ink;
+                                vertical-alignment: center;
+                                overflow: elide;
+                                min-width: 0px;
+                                horizontal-stretch: 1;
+                            }
+                            // How it ended; the whole reason in its tooltip when it is long.
+                            Rectangle {
+                                min-width: 0px;
+                                max-width: 220px;
+                                horizontal-stretch: 0;
+                                preferred-width: ot.preferred-width;
+                                ot := Text {
+                                    width: 100%;
+                                    height: 100%;
+                                    text: root.run-outcome;
+                                    font-size: Type.small;
+                                    color: root.run-outcome-state == 1 ? Theme.ok-text : root.run-outcome-state == 2 ? Theme.warn-text : root.run-outcome-state == 3 ? Theme.danger-text : Theme.ink-2;
+                                    vertical-alignment: center;
+                                    overflow: elide;
+                                }
+                                TipArea {
+                                    tooltip: root.run-outcome;
+                                    enabled: root.run-outcome-state >= 2;
+                                }
+                            }
+                            if root.run-label-shown: VerticalLayout {
+                                alignment: center;
+                                Field {
+                                    width: 190px;
+                                    horizontal-stretch: 0;
+                                    placeholder: "your label for this test";
+                                    a11y-name: "Label";
+                                    text <=> root.run-label;
+                                    inert: root.inert;
+                                    edited(t) => { root.label-edited(t); }
+                                    accepted => { root.label-accepted(); }
+                                    escaped => { root.label-escaped() }
+                                    blurred => { root.label-accepted(); }
+                                }
+                            }
+                            if root.run-done: VerticalLayout {
+                                alignment: center;
+                                CopyButton {
+                                    caption: "One line";
+                                    tooltip: "Copy the one-line result";
+                                    inert: root.inert;
+                                    copy => { root.copy-line() }
+                                }
+                            }
+                            if root.run-done: VerticalLayout {
+                                alignment: center;
+                                CopyButton {
+                                    caption: "As text";
+                                    tooltip: "Copy as text (iperf3's summary)";
+                                    inert: root.inert;
+                                    copy => { root.copy-block() }
+                                }
+                            }
+                        }
+                        Rectangle {
+                            y: parent.height - 1px;
+                            height: 1px;
+                            background: Theme.line;
+                        }
+                    }
+                    Chart {
+                        vertical-stretch: 1;
+                        c: root.chart;
+                        resized(w, h) => { root.chart-resized(w, h); }
+                    }
+                    for h in root.hints: HorizontalLayout {
+                        padding-left: 14px;
+                        padding-right: 14px;
+                        padding-bottom: 4px;
+                        Text {
+                            text: h;
+                            wrap: word-wrap;
+                            min-height: self.preferred-height;
+                            font-size: Type.small;
+                            color: Theme.warn-text;
+                        }
+                    }
+                    Rectangle { height: 1px; background: Theme.line; }
+                    StreamTable {
+                        rows: root.stream-rows;
+                        head-a: root.head-a;
+                        head-b: root.head-b;
+                        head-c: root.head-c;
+                    }
+                }
+            }
+            Rectangle { width: 1px; background: Theme.line; }
+            // The lists.
+            Rectangle {
+                width: 320px;
+                if root.mode == 0: RunList {
+                    title: "HISTORY";
+                    count: root.history-count;
+                    rows: root.history;
+                    empty-text: root.history-empty;
+                    note: root.history-note;
+                    scroll-to: root.history-scroll-to;
+                    scroll-seq: root.history-scroll-seq;
+                    inert: root.inert;
+                    row-clicked(id) => { root.history-clicked(id); }
+                    row-opened(id) => { root.history-opened(id); }
+                    key(t, c, s) => { root.history-key(t, c, s) }
+                }
+                if root.mode == 1: VerticalLayout {
+                    ReachList {
+                        rows: root.reach;
+                        empty-text: root.reach-empty;
+                        inert: root.inert;
+                        copy-text(t) => { root.copy-text(t) }
+                    }
+                    Rectangle { height: 1px; background: Theme.line; }
+                    RunList {
+                        vertical-stretch: 1;
+                        title: "TESTS SERVED";
+                        count: root.served-count;
+                        rows: root.served;
+                        empty-text: "None yet this session.";
+                        scroll-to: root.served-scroll-to;
+                        scroll-seq: root.served-scroll-seq;
+                        inert: root.inert;
+                        row-clicked(id) => { root.served-clicked(id); }
+                        row-opened(id) => { root.served-clicked(id); }
+                        key(t, c, s) => { root.served-key(t, c, s) }
+                    }
+                }
+            }
+        }
+
+        // ---- the status line ----
+        Rectangle { height: 1px; background: Theme.line; }
+        Rectangle {
+            height: 26px;
+            HorizontalLayout {
+                padding-left: 14px;
+                padding-right: 14px;
+                spacing: 12px;
+                Text { text: root.status-left; color: Theme.ink-2; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; min-width: 0px; }
+                Text { text: root.status-right; font-family: Type.mono; color: Theme.ink-3; vertical-alignment: center; }
+            }
+        }
+    }
+
+    // Toasts, newest at the bottom, above the status line.
+    VerticalLayout {
+        x: root.width - self.width - 14px;
+        y: root.height - self.height - 40px;
+        width: 380px;
+        height: self.preferred-height;
+        spacing: 8px;
+        for t in root.toasts: Toast {
+            text: t.text;
+            kind: t.kind;
+            action: t.action;
+            inert: root.inert;
+            action-clicked => { root.toast-action(t.id); }
+            dismissed => { root.toast-dismissed(t.id); }
+            copy => { root.copy-text(t.text) }
+        }
+    }
+
+    if root.fw-open: FirewallDialog {
+        width: root.width;
+        height: root.height;
+        body: root.fw-body;
+        has-blocks: root.fw-has-blocks;
+        remove-blocks <=> root.fw-remove-blocks;
+        cancelled => { root.fw-cancel(); }
+        accepted => { root.fw-continue(); }
+    }
+
+    if root.about-open: AboutDialog {
+        width: root.width;
+        height: root.height;
+        line: root.about-line;
+        rows: root.check-rows;
+        checking: root.checking;
+        checked: root.checked;
+        check => { root.check-install(); }
+        open-site => { root.open-site(); }
+        closed => { root.about-open = false; }
+    }
+
+    TipLayer {}
+}

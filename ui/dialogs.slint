@@ -1,0 +1,52 @@
+// The one question VibePerf asks before Windows does: may the server open the firewall.
+
+import { Theme, Type, Button, ButtonKind, Dialog, Checkbox } from "@vibeware";
+
+export component FirewallDialog {
+    in property <string> body;
+    // Inbound block rules for this exe exist (listed in the body): offer to remove them in the
+    // same step, off by default (one may be someone's deliberate choice).
+    in property <bool> has-blocks;
+    in-out property <bool> remove-blocks: false;
+    callback cancelled();
+    callback accepted();
+
+    Dialog {
+        width: root.width;
+        height: root.height;
+        title: "Let other PCs reach this server?";
+        dialog-width: 460px;
+        cancelled => { root.cancelled(); }
+        accepted => { root.accepted(); }
+        Text {
+            text: root.body;
+            wrap: word-wrap;
+            font-size: Type.small;
+            color: Theme.ink-2;
+        }
+        if root.has-blocks: Checkbox {
+            text: "Also remove these block rules";
+            checked <=> root.remove-blocks;
+        }
+        Text {
+            text: "Windows asks once for permission. Without it, VibePerf works as a client only.";
+            wrap: word-wrap;
+            font-size: Type.small;
+            color: Theme.ink-3;
+        }
+        HorizontalLayout {
+            alignment: end;
+            spacing: 8px;
+            Button {
+                text: "Cancel";
+                kind: ButtonKind.ghost;
+                clicked => { root.cancelled(); }
+            }
+            Button {
+                text: "Continue";
+                kind: ButtonKind.primary;
+                clicked => { root.accepted(); }
+            }
+        }
+    }
+}

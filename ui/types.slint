@@ -1,0 +1,64 @@
+// The records Rust hands the window. Every string is formatted in Rust; the .slint files only
+// lay them out.
+
+// One tile of the summary strip.
+export struct TileInfo {
+    shown: bool,
+    caption: string,
+    value: string,
+    sub: string,
+    // 0 plain, 1 ok, 2 warn, 3 danger (status colours carry status only).
+    state: int,
+    tip: string,
+}
+
+// The live graph, in pixels of its own plot (Rust knows the size through `chart-resized`).
+export struct ChartInfo {
+    grid: string,
+    // Bars this computer sent (up) and received (down), each its own colour when both run.
+    up: string,
+    down: string,
+    y-top: string,
+    y-mid: string,
+    y-top-at: length,
+    y-mid-at: length,
+    x-left: string,
+    x-right: string,
+    // Instead of bars: "Waiting for the first second", "No data".
+    empty: string,
+    // The legend: what the bars are ("Mbit/s per second, as sent by this computer").
+    legend-up: string,
+    legend-down: string,
+    a11y: string,
+}
+
+// One stream of the table.
+export struct StreamLine {
+    id: string,
+    dir: string,
+    bytes: string,
+    rate: string,
+    // TCP: retransmitted, RTT, cwnd; UDP: jitter, lost/total (`col-c` empty).
+    col-a: string,
+    col-b: string,
+    col-c: string,
+    a11y: string,
+}
+
+// One finished test in the history list (or one served test in the server's log).
+export struct RunLine {
+    id: string,
+    time: string,
+    title: string,
+    line: string,
+    // 0 complete, 1 stopped (partial), 2 failed.
+    state: int,
+    selected: bool,
+    a11y: string,
+}
+
+// One address in "Reach me at".
+export struct ReachLine {
+    addr: string,
+    adapter: string,
+}

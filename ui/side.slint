@@ -1,0 +1,237 @@
+// The right-hand panel: the client's history of finished tests, or the server's "Reach me at"
+// and the tests it served. One accessibility node per row; Up/Down/Home/End and the clicks go
+// to Rust, which decides.
+
+import { ListView } from "std-widgets.slint";
+import { Theme, Type, SectionLabel, Button, ButtonKind, CopyButton } from "@vibeware";
+import { RunLine, ReachLine } from "types.slint";
+
+component Row inherits Rectangle {
+    in property <RunLine> r;
+    callback clicked();
+    callback opened();
+    height: 46px;
+    accessible-role: list-item;
+    accessible-label: root.r.title;
+    accessible-description: root.r.a11y;
+    accessible-item-selectable: true;
+    accessible-item-selected: root.r.selected;
+    accessible-action-default => { root.clicked(); }
+    background: root.r.selected ? Theme.accent-soft : ta.has-hover ? Theme.surface-2 : transparent;
+    ta := TouchArea {
+        clicked => { root.clicked(); }
+        double-clicked => { root.opened(); }
+    }
+    if root.r.selected: Rectangle {
+        x: 0;
+        width: 2px;
+        background: Theme.accent;
+    }
+    VerticalLayout {
+        padding-left: 12px;
+        padding-right: 12px;
+        padding-top: 5px;
+        padding-bottom: 5px;
+        spacing: 2px;
+        HorizontalLayout {
+            spacing: 8px;
+            Text {
+                text: root.r.time;
+                font-family: Type.mono;
+                font-size: Type.small;
+                color: Theme.ink-3;
+                vertical-alignment: center;
+                accessible-role: none;
+            }
+            Text {
+                text: root.r.title;
+                font-size: Type.small;
+                font-weight: Type.strong;
+                color: Theme.ink;
+                vertical-alignment: center;
+                overflow: elide;
+                min-width: 0px;
+                horizontal-stretch: 1;
+                accessible-role: none;
+            }
+        }
+        Text {
+            text: root.r.line;
+            font-family: Type.mono;
+            font-size: Type.small;
+            color: root.r.state == 2 ? Theme.danger-text : root.r.state == 1 ? Theme.warn-text : Theme.ink-2;
+            overflow: elide;
+            min-width: 0px;
+            accessible-role: none;
+        }
+    }
+}
+
+// A list of runs: history (client) or served tests (server).
+export component RunList inherits Rectangle {
+    in property <string> title;
+    in property <string> count;
+    in property <[RunLine]> rows;
+    in property <string> empty-text;
+    in property <string> note;
+    in property <int> scroll-to: -1;
+    in property <int> scroll-seq;
+    in property <bool> inert;
+    callback row-clicked(string);
+    callback row-opened(string);
+    callback key(string, bool, bool) -> bool;
+
+    public function focus-list() {
+        fs.focus();
+    }
+
+    // Deferred a tick (the list lays new rows out first), and done twice: one pass after End
+    // was measured not to be enough (VIBEWARE.md).
+    property <int> passes;
+    changed scroll-seq => {
+        root.passes = 2;
+        later.running = true;
+    }
+    later := Timer {
+        interval: 1ms;
+        running: false;
+        triggered => {
+            if (root.scroll-to >= 0) {
+                let top = root.scroll-to * 46px;
+                if (top < -list.content-y) {
+                    list.content-y = -top;
+                } else if (top + 46px > -list.content-y + list.visible-height) {
+                    list.content-y = -(top + 46px - list.visible-height);
+                }
+            }
+            root.passes -= 1;
+            if (root.passes <= 0) {
+                self.running = false;
+            }
+        }
+    }
+
+    VerticalLayout {
+        padding-top: 10px;
+        spacing: 6px;
+        HorizontalLayout {
+            padding-left: 12px;
+            padding-right: 12px;
+            SectionLabel { text: root.title + (root.count != "" ? " · " + root.count : ""); }
+        }
+        if root.note != "": HorizontalLayout {
+            padding-left: 12px;
+            padding-right: 12px;
+            Text {
+                text: root.note;
+                wrap: word-wrap;
+                min-height: self.preferred-height;
+                font-size: Type.small;
+                color: Theme.warn-text;
+            }
+        }
+        Rectangle {
+            vertical-stretch: 1;
+            fs := FocusScope {
+                accessible-role: AccessibleRole.list;
+                accessible-label: root.title;
+                focus-on-tab-navigation: !root.inert && root.rows.length > 0;
+                key-pressed(e) => {
+                    if (root.key(e.text, e.modifiers.control, e.modifiers.shift)) {
+                        return accept;
+                    }
+                    reject
+                }
+                list := ListView {
+                    for r in root.rows: Row {
+                        r: r;
+                        clicked => {
+                            fs.focus();
+                            root.row-clicked(r.id);
+                        }
+                        opened => { root.row-opened(r.id); }
+                    }
+                }
+            }
+            if root.rows.length == 0: Text {
+                x: 12px;
+                width: parent.width - 24px;
+                y: 8px;
+                text: root.empty-text;
+                wrap: word-wrap;
+                font-size: Type.small;
+                color: Theme.ink-3;
+            }
+        }
+    }
+}
+
+// "Reach me at": every address of this computer a client can use, big and mono.
+export component ReachList inherits Rectangle {
+    in property <[ReachLine]> rows;
+    in property <string> empty-text;
+    in property <bool> inert;
+    callback copy-text(string) -> bool;
+    height: lay.preferred-height;
+    lay := VerticalLayout {
+        padding-top: 10px;
+        padding-bottom: 10px;
+        spacing: 4px;
+        HorizontalLayout {
+            padding-left: 12px;
+            padding-right: 12px;
+            SectionLabel { text: "REACH ME AT"; }
+        }
+        for a in root.rows: Rectangle {
+            height: 30px;
+            accessible-role: list-item;
+            accessible-label: a.addr;
+            accessible-description: a.adapter;
+            HorizontalLayout {
+                padding-left: 12px;
+                padding-right: 6px;
+                spacing: 8px;
+                Text {
+                    text: a.addr;
+                    font-family: Type.mono;
+                    font-size: Type.body;
+                    font-weight: Type.strong;
+                    color: Theme.ink;
+                    vertical-alignment: center;
+                    overflow: elide;
+                    min-width: 0px;
+                    horizontal-stretch: 1;
+                    accessible-role: none;
+                }
+                Text {
+                    text: a.adapter;
+                    font-size: Type.small;
+                    color: Theme.ink-3;
+                    vertical-alignment: center;
+                    overflow: elide;
+                    max-width: 90px;
+                    accessible-role: none;
+                }
+                VerticalLayout {
+                    alignment: center;
+                    CopyButton {
+                        tooltip: "Copy " + a.addr;
+                        inert: root.inert;
+                        copy => { root.copy-text(a.addr) }
+                    }
+                }
+            }
+        }
+        if root.rows.length == 0: HorizontalLayout {
+            padding-left: 12px;
+            padding-right: 12px;
+            Text {
+                text: root.empty-text;
+                wrap: word-wrap;
+                min-height: self.preferred-height;
+                font-size: Type.small;
+                color: Theme.ink-3;
+            }
+        }
+    }
+}

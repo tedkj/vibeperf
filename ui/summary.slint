@@ -1,0 +1,108 @@
+// The answer first: the test's numbers in VibeWare's tile look, under the controls.
+
+import { Theme, Type, Chamfer, Kbd, TipArea } from "@vibeware";
+import { TileInfo } from "types.slint";
+
+component Tile inherits Chamfer {
+    in property <TileInfo> t;
+    fill: Theme.surface;
+    stroke: Theme.line;
+    height: 44px;
+    min-width: 96px;
+    horizontal-stretch: 1;
+    // One node per tile: "Throughput, 941 Mbit/s, sent 944".
+    accessible-role: text;
+    accessible-label: root.t.caption;
+    accessible-value: root.t.value;
+    accessible-description: root.t.sub;
+    VerticalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        alignment: center;
+        spacing: 1px;
+        Text {
+            text: root.t.caption;
+            font-family: Type.mono;
+            font-size: Type.small;
+            color: Theme.ink-3;
+            overflow: elide;
+            accessible-role: none;
+        }
+        HorizontalLayout {
+            spacing: 8px;
+            Text {
+                text: root.t.value;
+                font-family: Type.mono;
+                font-size: Type.body;
+                font-weight: Type.strong;
+                color: root.t.state == 1 ? Theme.ok-text : root.t.state == 2 ? Theme.warn-text : root.t.state == 3 ? Theme.danger-text : Theme.ink;
+                vertical-alignment: center;
+                overflow: elide;
+                min-width: 0px;
+                horizontal-stretch: 0;
+                accessible-role: none;
+            }
+            Text {
+                text: root.t.sub;
+                font-family: Type.mono;
+                font-size: Type.small;
+                color: Theme.ink-3;
+                vertical-alignment: center;
+                overflow: elide;
+                min-width: 0px;
+                horizontal-stretch: 1;
+                accessible-role: none;
+            }
+        }
+    }
+    TipArea {
+        tooltip: root.t.tip;
+        enabled: root.t.tip != "";
+    }
+}
+
+export component SummaryStrip inherits Rectangle {
+    in property <[TileInfo]> tiles;
+    // Before the first test: what to do (the field's hint).
+    in property <string> hint-before;
+    in property <string> hint-after;
+    in property <string> hint-key;
+    height: 64px;
+
+    if root.tiles.length == 0: HorizontalLayout {
+        padding-left: 14px;
+        padding-right: 14px;
+        spacing: 6px;
+        alignment: start;
+        Text {
+            text: root.hint-before;
+            font-size: Type.small;
+            color: Theme.ink-2;
+            vertical-alignment: center;
+        }
+        if root.hint-key != "": VerticalLayout {
+            alignment: center;
+            Kbd { text: root.hint-key; }
+        }
+        Text {
+            text: root.hint-after;
+            font-size: Type.small;
+            color: Theme.ink-2;
+            vertical-alignment: center;
+            overflow: elide;
+            min-width: 0px;
+            horizontal-stretch: 1;
+        }
+    }
+
+    if root.tiles.length > 0: HorizontalLayout {
+        padding-left: 14px;
+        padding-right: 14px;
+        spacing: 8px;
+        for t in root.tiles: VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 1;
+            Tile { t: t; }
+        }
+    }
+}
